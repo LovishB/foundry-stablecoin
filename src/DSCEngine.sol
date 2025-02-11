@@ -202,9 +202,9 @@ contract DSCEngine is ReentrancyGuard {
     * @param user The address of the user to check
     * 
     * Example scenarios (assuming PERCENTAGE = 100, LIQUIDATION_THRESHOLD = 150):
-    * - At 150% collateral: returns 1.0 (liquidation point)
-    * - At 200% collateral: returns 1.33 (healthy)
-    * - At 100% collateral: returns 0.66 (unhealthy)
+    * - At 150% collateral: returns 1 (liquidation point)
+    * - At 200% collateral: returns 1 (healthy)
+    * - At 100% collateral: returns 0 (unhealthy)
     */
     function _healthFactor(address user) private view returns (uint256) {
         // 1. Get total DSC balance of the user (1DSC = 1USD)
@@ -233,7 +233,7 @@ contract DSCEngine is ReentrancyGuard {
     */
     function _getCollateralValueInUsd(address user) private view returns (uint256) {
         // 1. Get the user's collateral balance (in WEI)
-        uint256 collateralBalance = s_collateralBalances[user];
+        uint256 collateralBalance = s_collateralBalances[user] / PRECISION;
 
         // 2. Get the price of 1 WETH in USD
         AggregatorV3Interface priceFeed = AggregatorV3Interface(i_ethUsdPriceFeed);
@@ -241,6 +241,32 @@ contract DSCEngine is ReentrancyGuard {
 
         // 3. Convert the collateral balance to USD value
         return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * collateralBalance) / PRECISION;
+    }
+
+
+    // Getter Functions
+    function getCollateralBalance(address user) external view returns (uint256) {
+        return s_collateralBalances[user];
+    }
+
+    function getDscBalance(address user) external view returns (uint256) {
+        return s_dscBalances[user];
+    }
+
+    function getHealthFactor(address user) external view returns (uint256) {
+        return _healthFactor(user);
+    }
+
+    function getWethAddress() external view returns (address) {
+        return address(i_weth);
+    }
+
+    function getEthUsdPriceFeedAddress() external view returns (address) {
+        return address(i_ethUsdPriceFeed);
+    }
+
+    function getDscAddress() external view returns (address) {
+        return address(i_dsc);
     }
 
 }
