@@ -114,7 +114,10 @@ contract DSCEngineTest is Test {
         uint256 DSCToMint = (collateralValueInUsd / 2) + 1e18;
 
         vm.expectRevert(
-            abi.encodeWithSelector(DSCEngine.DSCEngine__NotEnoughCollateral.selector)
+            abi.encodeWithSelector(
+                DSCEngine.DSCEngine__HealthFactorBelowThreshold.selector,
+                3
+            )
         );
         engine.mintDSC(DSCToMint);
         vm.stopPrank();
@@ -167,7 +170,10 @@ contract DSCEngineTest is Test {
         wethMock.mint(user, 10 ether);
         wethMock.approve(address(engine), 2 ether);
         vm.expectRevert(
-            abi.encodeWithSelector(DSCEngine.DSCEngine__NotEnoughCollateral.selector)
+            abi.encodeWithSelector(
+                DSCEngine.DSCEngine__HealthFactorBelowThreshold.selector,
+                2
+            )
         );
         engine.depositCollateralAndMintDsc(address(wethMock), 2 ether, 3000e18); // minting DSC more than possible
         vm.stopPrank();
@@ -201,7 +207,74 @@ contract DSCEngineTest is Test {
         wethMock.approve(address(engine), 2 ether);
         engine.depositCollateralAndMintDsc(address(wethMock), 2 ether, 2000e18); //200% collateralization
         uint256 factor = engine.getHealthFactor(user);
-        assertEq(factor, 1);
+        assertEq(factor, 4);
+        vm.stopPrank();
+    }
+
+    //Tests for burnDSC
+    function testBurnDSCRevertsAmountIsZero() public {
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(DSCEngine.DSCEngine__AmountMustBeMoreThanZero.selector)
+        );
+        engine.burnDSC(0);
+    }
+
+    function testBurnDSCRevertsNotEnoughDSC() public {
+        vm.startPrank(user);
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 2 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 2 ether, 2000e18);// minted 2000$(2000e18) DSC with 4000$ collateral(2 ether)
+        vm.expectRevert(
+            abi.encodeWithSelector(DSCEngine.DSCEngine__NotEnoughDSC.selector)
+        );
+        engine.burnDSC(5000e18);
+        vm.stopPrank();
+    }
+
+    function testBurnDSCRevertsNoApprovalGivenToEngine() public {
+        vm.startPrank(user);
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 2 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 2 ether, 2000e18);// minted 2000$(2000e18) DSC with 4000$ collateral(2 ether)
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("ERC20InsufficientAllowance(address,uint256,uint256)")),
+                address(engine), // spender
+                0,              // current allowance
+                2000e18        // requested amount
+            )
+        );
+        engine.burnDSC(2000e18);
+        vm.stopPrank();
+    }
+
+    function testBurnDSCSuccess() public {
+        vm.startPrank(user);
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 4 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 3 ether, 3000e18);
+        dsc.approve(address(engine), 2000e18); //approving engine to transfer dsc and then burn eventually
+
+        uint256 userDscBalanceBefore = dsc.balanceOf(user);
+        uint256 engineTrackedBalanceBefore = engine.getDscBalance(user);
+
+        engine.burnDSC(2000e18);
+
+        // Check state changes
+        uint256 userDscBalanceAfter = dsc.balanceOf(user);
+        uint256 engineTrackedBalanceAfter = engine.getDscBalance(user);
+
+        // Assertions
+        assertEq(userDscBalanceAfter, 1000e18, "User's DSC balance should be 1000 after burning");
+        assertEq(engineTrackedBalanceAfter, 1000e18, "Engine's tracked DSC balance should be 1000");
+        assertEq(userDscBalanceAfter, userDscBalanceBefore - 2000e18, "DSC balance should decrease by burn amount");
         vm.stopPrank();
     }
 

@@ -5,6 +5,7 @@ import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {console} from "forge-std/console.sol";
 
 /*
  * @title DSCEngine
@@ -50,7 +51,9 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TransferFailed();
     error DSCEngine__HealthFactorBelowThreshold(uint256 healthFactor);
     error DSCEngine__NotEnoughCollateral();
+    error DSCEngine__NotEnoughDSC();
     error DSCEngine__MintFailed();
+    error DSCEngine__BurnFailed();
 
     //Events
     event CollateralDeposited(address indexed user, address indexed token, uint256 amount);
@@ -100,6 +103,21 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     /**
+     * @param tokenCollateralAddress: The ERC20 token address of the collateral you're redeeming
+     * @param amountCollateral: The amount of collateral you're redeeming
+     * @param amountDscToBurn: The amount of DSC you want to burn
+     * @notice This function will burn DSC and redeem your collateral in one transaction
+     */
+    function redeemCollateralAndBurnDSC(
+        address tokenCollateralAddress,
+        uint256 amountCollateral,
+        uint256 amountDscToBurn
+    ) external {
+        burnDSC(amountDscToBurn);
+        redeemCollateral(tokenCollateralAddress, amountCollateral);
+    }
+
+    /**
     * @notice Allows users to deposit WETH collateral to the protocol
     * @dev The collateral is transferred from the user to this contract
     * @dev Emits CollateralDeposited event on successful deposit
@@ -133,14 +151,6 @@ contract DSCEngine is ReentrancyGuard {
         }
     }
 
-    function redeemCollateralAndBurnDSC() external {}
-
-    function redeemCollateral() external {}
-
-    function burnDSC() external {}
-
-    function liquidate() external {}
-
     /**
     * @notice Mints DSC tokens for the caller based on their collateral
     * @dev Enforces a 200% collateralization ratio for all mints
@@ -160,37 +170,101 @@ contract DSCEngine is ReentrancyGuard {
     function mintDSC(
         uint256 _amountDscToMint
     ) moreThanZero(_amountDscToMint) nonReentrant public {
-        // 1. Get the user's collateral balance in USD
-        uint256 collateralValue = _getCollateralValueInUsd(msg.sender);
-
-        // 2. Calculate total DSC amount post mint in USD
-        uint256 totalDscAmount = (s_dscBalances[msg.sender] + _amountDscToMint) / PRECISION;
-
-        // 3. Check if the user has enough collateral to mint DSC (200%)
-        if(collateralValue < (totalDscAmount * OPTIMAL_COLLATERAL_RATIO) / PERCENTAGE) {
-            revert DSCEngine__NotEnoughCollateral();
+        // 1. Update the user's DSC balance and then check health factor, if not >4 revert
+        s_dscBalances[msg.sender] += _amountDscToMint;
+    
+        // 2. Check if health factor remains >= 4 (200% collateralization)
+        if(_healthFactor(msg.sender) < 4) {
+            revert DSCEngine__HealthFactorBelowThreshold(_healthFactor(msg.sender));
         }
 
-        // 4. Update the user's DSC balance in our tracking
-        s_dscBalances[msg.sender] += _amountDscToMint;
-
-        // 5. Mint the DSC tokens to the user
+        // 3. Mint the DSC tokens to the user
         bool success = i_dsc.mint(msg.sender, _amountDscToMint);
         if(!success) {
+            s_dscBalances[msg.sender] -= _amountDscToMint; // Restore the state if mint fails
             revert DSCEngine__MintFailed();
         }
     }
 
     /**
-    * @notice Reverts if the health factor of a user's position is below the threshold
-    * @param user The address of the user to check
+    * @notice Allows users to withdraw their WETH collateral from the protocol
+    * @dev User's health factor must remain >= 4 (200% collateralization) after withdrawal
+    * 
+    * @param _collateralTokenAddress The address of the collateral token (must be WETH)
+    * @param _collateralAmount The amount of collateral to withdraw (in wei)
+    * 
+    * Requirements:
+    * - Amount must be greater than 0
+    * - Token must be WETH and user must have sufficient collateral balance
+    * - Withdrawal must maintain 200% collateral ratio (health factor >= 4)
+    *
+    * Example:
+    * - User has 200 USD of ETH collateral and 50 DSC debt
+    * - Can withdraw up to 100 USD of ETH while maintaining 200% ratio
     */
-    function _revertIfHealthFactorBelowThreshold(address user) private view {
-        uint256 healthFactor = _healthFactor(user);
-        if(healthFactor < MINIMUM_HEALTH_FACTOR) {
-            revert DSCEngine__HealthFactorBelowThreshold(healthFactor);
+    function redeemCollateral(
+        address _collateralTokenAddress,
+        uint256 _collateralAmount
+    ) moreThanZero(_collateralAmount) isAllowedToken(_collateralTokenAddress) nonReentrant() public {
+        // 1. Check if the user has enough collateral to redeem
+        if(s_collateralBalances[msg.sender] < _collateralAmount) {
+            revert DSCEngine__NotEnoughCollateral();
+        }
+
+        // 2. Update the user's collatral balance and then check health factor, if not >4 revert (200% collateral ratio)
+        s_collateralBalances[msg.sender] -= _collateralAmount;
+        if(_healthFactor(msg.sender) < 4) {
+            revert DSCEngine__HealthFactorBelowThreshold(_healthFactor(msg.sender));
+        }
+
+        // 3. Transfer the collateral from this contract to the user
+        bool success = IERC20(_collateralTokenAddress).transfer(msg.sender, _collateralAmount);
+        if(!success) {
+            revert DSCEngine__TransferFailed();
         }
     }
+
+    /**
+    * @notice Burns DSC tokens to reduce user's debt position in the protocol
+    * @dev No health factor check needed as burning DSC always improves the position
+    *
+    * @param _amountDscToBurn Amount of DSC to burn (in wei)
+    * 
+    * Requirements:
+    * - Amount must be greater than 0
+    * - User must have enough DSC balance to burn
+    * - User must have approved this contract to burn their DSC
+    * 
+    * Example:
+    * - User has $2000 worth of ETH collateral and 1000 DSC debt
+    * - Burns 500 DSC, reducing debt to 500 DSC
+    * - Collateralization ratio improves from 200% to 400%
+    */
+    function burnDSC(
+        uint256 _amountDscToBurn
+    ) moreThanZero(_amountDscToBurn) nonReentrant public {
+        // 1. Check if the user has enough DSC to burn
+        console.log(s_dscBalances[msg.sender]);
+        console.log(_amountDscToBurn);
+        if(s_dscBalances[msg.sender] < _amountDscToBurn) {
+            revert DSCEngine__NotEnoughDSC();
+        }
+
+        // 2. Update uers's DSC balance
+        s_dscBalances[msg.sender] -= _amountDscToBurn;
+
+        // 3. Transfer DSC tokens from user to engine for burning
+        bool transferSuccess = i_dsc.transferFrom(msg.sender, address(this), _amountDscToBurn);
+        if(!transferSuccess) {
+            revert DSCEngine__TransferFailed();
+        }
+
+        // 3. Burning the DSC tokens
+        // No need to check health factor as DSC burning improves the health factor and manages collateral
+        i_dsc.burn(_amountDscToBurn);
+    }
+
+    function liquidate() external {}
 
     /**
     * @notice Calculates the health factor for a user's position
@@ -202,9 +276,10 @@ contract DSCEngine is ReentrancyGuard {
     * @param user The address of the user to check
     * 
     * Example scenarios (assuming PERCENTAGE = 100, LIQUIDATION_THRESHOLD = 150):
-    * - At 150% collateral: returns 1 (liquidation point)
-    * - At 200% collateral: returns 1 (healthy)
-    * - At 100% collateral: returns 0 (unhealthy)
+    * - At 150% collateral: returns 3 (liquidation point)
+    * - At 200% collateral: returns 4 (healthy)
+    * - At 100% collateral: returns 2 (unhealthy)
+    * - At 0% collateral: returns 0 (liquidated)
     */
     function _healthFactor(address user) private view returns (uint256) {
         // 1. Get total DSC balance of the user (1DSC = 1USD)
@@ -216,7 +291,7 @@ contract DSCEngine is ReentrancyGuard {
         uint256 collateralBalance = _getCollateralValueInUsd(user);
 
         // 3. Calculate the health factor
-        return collateralBalance * PERCENTAGE / (dscBalance * LIQUIDATION_THRESHOLD);
+        return collateralBalance * 2 / (dscBalance);
     }
 
     /**
