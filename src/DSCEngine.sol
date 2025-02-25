@@ -244,8 +244,6 @@ contract DSCEngine is ReentrancyGuard {
         uint256 _amountDscToBurn
     ) moreThanZero(_amountDscToBurn) nonReentrant public {
         // 1. Check if the user has enough DSC to burn
-        console.log(s_dscBalances[msg.sender]);
-        console.log(_amountDscToBurn);
         if(s_dscBalances[msg.sender] < _amountDscToBurn) {
             revert DSCEngine__NotEnoughDSC();
         }
@@ -285,7 +283,7 @@ contract DSCEngine is ReentrancyGuard {
         // 1. Get total DSC balance of the user (1DSC = 1USD)
         uint256 dscBalance = s_dscBalances[user] / PRECISION;
         if(dscBalance == 0) {
-            return 0;
+            return type(uint256).max;
         }
         // 2. Get total collateral balance of the user (in USD)
         uint256 collateralBalance = _getCollateralValueInUsd(user);
@@ -308,16 +306,16 @@ contract DSCEngine is ReentrancyGuard {
     */
     function _getCollateralValueInUsd(address user) private view returns (uint256) {
         // 1. Get the user's collateral balance (in WEI)
-        uint256 collateralBalance = s_collateralBalances[user] / PRECISION;
+        uint256 collateralBalance = s_collateralBalances[user];
 
         // 2. Get the price of 1 WETH in USD
         AggregatorV3Interface priceFeed = AggregatorV3Interface(i_ethUsdPriceFeed);
         (, int256 price,,,) = priceFeed.latestRoundData();
 
         // 3. Convert the collateral balance to USD value
-        return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * collateralBalance) / PRECISION;
+        uint256 collateralValueInUsd = ((uint256(price) * ADDITIONAL_FEED_PRECISION) * collateralBalance) / PRECISION;
+        return collateralValueInUsd / PRECISION;
     }
-
 
     // Getter Functions
     function getCollateralBalance(address user) external view returns (uint256) {

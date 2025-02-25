@@ -195,7 +195,7 @@ contract DSCEngineTest is Test {
     function testHealthFactorZeroDSCBalance() public {
         vm.startPrank(user);
         uint256 factor = engine.getHealthFactor(user);
-        assertEq(factor, 0);
+        assertEq(factor, type(uint256).max);
         vm.stopPrank();
     }
 
@@ -263,8 +263,6 @@ contract DSCEngineTest is Test {
         dsc.approve(address(engine), 2000e18); //approving engine to transfer dsc and then burn eventually
 
         uint256 userDscBalanceBefore = dsc.balanceOf(user);
-        uint256 engineTrackedBalanceBefore = engine.getDscBalance(user);
-
         engine.burnDSC(2000e18);
 
         // Check state changes
@@ -277,5 +275,90 @@ contract DSCEngineTest is Test {
         assertEq(userDscBalanceAfter, userDscBalanceBefore - 2000e18, "DSC balance should decrease by burn amount");
         vm.stopPrank();
     }
+
+    //Tests for redeem Collateral
+    function testRedeemCollateralRevertsZeroAmount() public {
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(DSCEngine.DSCEngine__AmountMustBeMoreThanZero.selector)
+        );
+        engine.redeemCollateral(weth, 0);
+    }
+
+    function testRedeemCollateralRevertsInvalidToken() public {
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(DSCEngine.DSCEngine__TokenNotAllowed.selector)
+        );
+        engine.redeemCollateral(makeAddr("invalidToken"), 1 ether);
+    }
+
+    function testRedeemCollateralRevertsNotEnoughCollateral() public {
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(DSCEngine.DSCEngine__NotEnoughCollateral.selector)
+        );
+        engine.redeemCollateral(weth, 1 ether);
+    }
+    
+    function testRedeemCollateralRevertsLowHealthFactor() public {
+        vm.startPrank(user);
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 2 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 2 ether, 2000e18); //collateral $4000
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DSCEngine.DSCEngine__HealthFactorBelowThreshold.selector,
+                3
+            )
+        );
+        engine.redeemCollateral(weth, 0.44 ether); //Health Factor < 4
+        vm.stopPrank();
+    }
+
+    function testRedeemCollateralSuccessful() public {
+        vm.startPrank(user);
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        uint256 userCollateralBalanceBefore = 3 ether;
+
+        wethMock.approve(address(engine), userCollateralBalanceBefore);
+        engine.depositCollateralAndMintDsc(address(wethMock), userCollateralBalanceBefore, 2000e18); //collateral $6000, dsc 2000$
+        engine.redeemCollateral(weth, 1 ether); //Health Factor = 4
+
+        // Check state changes
+        uint256 userCollateralBalanceAfter = engine.getCollateralBalance(user);
+
+        // Assertions
+        assertEq(userCollateralBalanceAfter, 2 ether, "User's Collateral balance should be 4000 after redeem");
+        assertEq(userCollateralBalanceAfter, userCollateralBalanceBefore - 1 ether, "DSC Collateral should decrease by redeem amount");
+        vm.stopPrank();
+    }
+
+
+    //Test for burn and redeem collateral
+    function testBurnDSCAndRedeemCollateralSuccessful() public {
+        vm.startPrank(user);
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+
+        wethMock.approve(address(engine), 4 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 4 ether, 2000e18); //collateral $8000, dsc 2000$
+
+        dsc.approve(address(engine), 1500e18); //approving engine to burn 1500$ worth dsc
+        engine.redeemCollateralAndBurnDSC(weth, 3 ether, 1500e18);//burning 1500$ dsc and redeem $6000 weth
+
+        // Check state changes
+        uint256 userCollateralBalanceAfter = engine.getCollateralBalance(user);
+
+        // Assertions
+        assertEq(userCollateralBalanceAfter, 1 ether, "User's Collateral balance should be 1000 after redeem");
+        vm.stopPrank();
+    }
+
 
 }
