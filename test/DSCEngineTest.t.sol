@@ -9,11 +9,14 @@ import { HelperConfig } from "../script/HelperConfig.s.sol";
 import {ERC20Mock} from "../test/mocks/ERC20Mock.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
+
 contract DSCEngineTest is Test {
     DecentralizedStableCoin dsc;
     DSCEngine engine;
     HelperConfig helperConfig;
     address user;
+    address liquidator;
     address weth;
     address priceFeed;
 
@@ -24,6 +27,7 @@ contract DSCEngineTest is Test {
         weth = _weth;
         priceFeed = _pricefeed;
         user = makeAddr("user");
+        liquidator = makeAddr("liquidator");
     }
 
     function testContractInitializesCorrectly() public view {
@@ -360,5 +364,156 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
     }
 
+    // Test Liquidate
+    function testLiquidateRevertsHealthy() public {
+        vm.startPrank(user);
+        //Create User Postion
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 2 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 2 ether, 2000e18); //collateral $4000, dsc 2000$
+        vm.stopPrank();
 
+        //Liquidator Calls to repay Debt and fails as health factor = 4
+        vm.prank(liquidator);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                DSCEngine.DSCEngine__HealthFactorAboveThreshold.selector,
+                4
+            )
+        );
+        engine.liquidate(weth, user, 1000e18);
+    }
+
+    function testLiquidateRevertsSeizingMoreCollateralThanUserHas() public {
+        vm.startPrank(user);
+        //Create User Postion
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 2 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 2 ether, 2000e18); //collateral $4000, dsc 2000$
+        vm.stopPrank();
+
+        // Modify PriceFeed for low collateral value
+        MockV3Aggregator mockPriceFeed = MockV3Aggregator(address(engine.getEthUsdPriceFeedAddress()));
+        int256 newPrice = 900e8;
+        mockPriceFeed.updateAnswer(newPrice); //now the collateral becomes $1800
+
+        vm.prank(liquidator);
+        vm.expectRevert(
+            abi.encodeWithSelector(DSCEngine.DSCEngine__NotEnoughCollateral.selector)
+        );
+        // total collateral to  be seized 1700/(900 eth price) + 10% bonus = 2.07 eth
+        engine.liquidate(weth, user, 1700e18);
+    }
+
+
+    function testLiquidateRevertsSeizinglessDebtThanUserHas() public {
+        vm.startPrank(user);
+        //Create User Postion
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 3 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 3 ether, 1000e18); //collateral $6000, dsc 1000$
+        vm.stopPrank();
+
+        // Modify PriceFeed for low collateral value
+        MockV3Aggregator mockPriceFeed = MockV3Aggregator(address(engine.getEthUsdPriceFeedAddress()));
+        int256 newPrice = 490e8;
+        mockPriceFeed.updateAnswer(newPrice); //now the collateral becomes $1470
+
+        vm.prank(liquidator);
+        vm.expectRevert(
+            abi.encodeWithSelector(DSCEngine.DSCEngine__NotEnoughDSC.selector)
+        );
+        // Liquidator tries to cover 1200 DSC when user only has 1000 DSC debt
+        engine.liquidate(weth, user, 1200e18);
+    }
+
+    function testLiquidateRevertsAllowanceNotGivenByLiquidator() public {
+        vm.startPrank(user);
+        //Create User Postion
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 3 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 3 ether, 1000e18); //collateral $6000, dsc 1000$
+        vm.stopPrank();
+
+        // Modify PriceFeed for low collateral value
+        MockV3Aggregator mockPriceFeed = MockV3Aggregator(address(engine.getEthUsdPriceFeedAddress()));
+        int256 newPrice = 490e8;
+        mockPriceFeed.updateAnswer(newPrice); //now the collateral becomes $1470
+
+        vm.prank(liquidator);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                bytes4(keccak256("ERC20InsufficientAllowance(address,uint256,uint256)")),
+                address(engine), // spender
+                0,              // current allowance
+                1000e18        // requested amount
+            )
+        );
+        engine.liquidate(weth, user, 1000e18);
+    }
+
+    function testLiquidatePartialDebt() public {
+        vm.startPrank(user);
+        //Create User Postion
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 3 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 3 ether, 1000e18); //collateral $6000, dsc 1000$
+        vm.stopPrank();
+
+        // Liquidator needs to have DSC himself
+        vm.startPrank(liquidator);
+        vm.deal(liquidator, 10 ether);
+        wethMock.mint(liquidator, 10 ether);
+        wethMock.approve(address(engine), 3 ether);
+        engine.depositCollateralAndMintDsc(address(weth), 3 ether, 1000e18);
+        dsc.approve(address(engine), 800e18); //approving engine to transfer and burn 800$ worth dsc
+
+        // Modify PriceFeed for low collateral value
+        MockV3Aggregator mockPriceFeed = MockV3Aggregator(address(engine.getEthUsdPriceFeedAddress()));
+        int256 newPrice = 490e8;
+        mockPriceFeed.updateAnswer(newPrice); //now the collateral becomes $1470
+
+        engine.liquidate(weth, user, 800e18);
+        assertEq(engine.getDscBalance(user), 200e18, "User's DSC balance should be 200 after liquidation");
+        assertTrue(engine.getHealthFactor(user) >= 4, "User's Collateral balance should be healthy after liquidation");
+        vm.stopPrank();
+    }
+
+    function testLiquidateCompleteDebt() public {
+        vm.startPrank(user);
+        //Create User Postion
+        vm.deal(user, 10 ether);
+        ERC20Mock wethMock = ERC20Mock(weth);
+        wethMock.mint(user, 10 ether);
+        wethMock.approve(address(engine), 3 ether);
+        engine.depositCollateralAndMintDsc(address(wethMock), 3 ether, 1000e18); //collateral $6000, dsc 1000$
+        vm.stopPrank();
+
+        // Liquidator needs to have DSC himself
+        vm.startPrank(liquidator);
+        vm.deal(liquidator, 10 ether);
+        wethMock.mint(liquidator, 10 ether);
+        wethMock.approve(address(engine), 3 ether);
+        engine.depositCollateralAndMintDsc(address(weth), 3 ether, 1000e18);
+        dsc.approve(address(engine), 1000e18); //approving engine to transfer and burn 1000$ worth dsc
+
+        // Modify PriceFeed for low collateral value
+        MockV3Aggregator mockPriceFeed = MockV3Aggregator(address(engine.getEthUsdPriceFeedAddress()));
+        int256 newPrice = 490e8;
+        mockPriceFeed.updateAnswer(newPrice); //now the collateral becomes $1470
+
+        engine.liquidate(weth, user, 1000e18);
+        assertEq(engine.getDscBalance(user), 0, "User's DSC balance should be 0 after complete liquidation");
+        vm.stopPrank();
+    }
 }

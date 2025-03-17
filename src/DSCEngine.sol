@@ -50,13 +50,25 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TokenNotAllowed();
     error DSCEngine__TransferFailed();
     error DSCEngine__HealthFactorBelowThreshold(uint256 healthFactor);
+    error DSCEngine__HealthFactorAboveThreshold(uint256 healthFactor);
     error DSCEngine__NotEnoughCollateral();
     error DSCEngine__NotEnoughDSC();
     error DSCEngine__MintFailed();
     error DSCEngine__BurnFailed();
 
     //Events
-    event CollateralDeposited(address indexed user, address indexed token, uint256 amount);
+    event CollateralDeposited(
+        address indexed user, 
+        address indexed token, 
+        uint256 amount
+    );
+    event PositionLiquidated(
+        address indexed user,
+        address indexed liquidator,
+        uint256 debtAmount,
+        address collateralToken,
+        uint256 collateralAmount
+    );
     
     //Modifiers
     modifier moreThanZero(uint256 _amount) {
@@ -115,6 +127,83 @@ contract DSCEngine is ReentrancyGuard {
     ) external {
         burnDSC(amountDscToBurn);
         redeemCollateral(tokenCollateralAddress, amountCollateral);
+    }
+
+    /**
+    * @notice External Actors can Liquidate an unhealthy position, repaying the debt in DSC and seizing collateral plus a bonus
+    * @dev Verifies position is eligible for liquidation and handles all asset transfers
+    * @dev Liquidator must approve DSC token spending before calling this function
+    * 
+    * @param _collateralTokenAddress The address of the collateral token (must be WETH)
+    * @param _user The address of the user whose position is being liquidated
+    * @param _debtToCover The amount of DSC debt to repay (in wei)
+    * 
+    * Requirements:
+    * - User must be below liquidation threshold (health factor < 3)
+    * - debtToCover must be > 0 and <= user's total debt
+    * - Liquidator must have enough DSC to cover the debt
+    * 
+    * Emits a {PositionLiquidated} event
+    */
+    function liquidate(
+        address _collateralTokenAddress,
+        address _user,
+        uint256 _debtToCover
+    ) moreThanZero(_debtToCover) isAllowedToken(_collateralTokenAddress) nonReentrant() external {
+        // 1. Check if health factor remains < 3 (below 150% collateralization)
+        uint256 healthFactor = _healthFactor(_user);
+        if(healthFactor >= 3) {
+            revert DSCEngine__HealthFactorAboveThreshold(healthFactor);
+        }
+
+        // 2. Calculate Collateral to Seize
+        uint256 collateralAmountFromDebtToCovered = _getCollateralAmountFromDsc(_debtToCover);
+        uint256 totalCollateralToSeize = (collateralAmountFromDebtToCovered * 110) / 100; // 10% Bonus
+        console.log("collateralAmountFromDebtToCovered", collateralAmountFromDebtToCovered);
+        console.log("totalCollateralToSeize", totalCollateralToSeize);
+        console.log("totalCollateralUser", s_collateralBalances[_user]);
+
+        // 3. Check if the totalCollateralToSeize < usersCollateral (we want the [debtCollateral + bonus] to pay from users collateral)
+        // Example User Postion -> 0.7 eth collateral(after fall price $2000), 1000$ debt (1000 DSC)
+        // Liquidator wants to cover 800$ DSC worth of debt
+        // so totalCollateral To be seized will be -> 0.4 ETH(800$ worth eth) + 0.04ETH(bonus)
+        // 0.44 < 0.7
+        if (s_collateralBalances[_user] < totalCollateralToSeize) {
+            revert DSCEngine__NotEnoughCollateral();
+        }
+
+        // 4. Check is the debtToCovered is less than actual user's debt
+        // User has $1000 debt (1000 DSC)
+        // Liquidator wants to cover $1200 debt
+        if (s_dscBalances[_user] < _debtToCover) {
+            revert DSCEngine__NotEnoughDSC();
+        }
+
+        // 5. Update user balances
+        s_dscBalances[_user] -= _debtToCover;
+        s_collateralBalances[_user] -= totalCollateralToSeize;
+
+        // 6. Transfer DSC from liquidator to engine and burn it
+        bool transferSuccess = i_dsc.transferFrom(msg.sender, address(this), _debtToCover);
+        if (!transferSuccess) {
+            revert DSCEngine__TransferFailed();
+        }
+        i_dsc.burn(_debtToCover);
+
+        // 7. Transfer seized collateral to liquidator
+        bool collateralTransferSuccess = IERC20(_collateralTokenAddress).transfer(msg.sender, totalCollateralToSeize);
+        if (!collateralTransferSuccess) {
+            revert DSCEngine__TransferFailed();
+        }
+
+        // 8. emit liquidation event
+        emit PositionLiquidated(
+            _user,
+            msg.sender,
+            _debtToCover,
+            _collateralTokenAddress,
+            totalCollateralToSeize
+        );
     }
 
     /**
@@ -262,8 +351,6 @@ contract DSCEngine is ReentrancyGuard {
         i_dsc.burn(_amountDscToBurn);
     }
 
-    function liquidate() external {}
-
     /**
     * @notice Calculates the health factor for a user's position
     * @dev Health factor is the ratio of collateral value to loan value
@@ -315,6 +402,22 @@ contract DSCEngine is ReentrancyGuard {
         // 3. Convert the collateral balance to USD value
         uint256 collateralValueInUsd = ((uint256(price) * ADDITIONAL_FEED_PRECISION) * collateralBalance) / PRECISION;
         return collateralValueInUsd / PRECISION;
+    }
+
+    /**
+    * @notice Converts DSC amount into equalwnt amount of WETH collateral
+    * @dev Example price of WETH is 2000$, then 1000 DSC = 0.5 WETH
+    * 
+    * @param dscAmountInWei USD amount in wei format
+    * @return uint256 Equivalent token amount
+    */
+    function _getCollateralAmountFromDsc(uint256 dscAmountInWei) private view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(i_ethUsdPriceFeed);
+        (, int256 price,,,) = priceFeed.latestRoundData();
+        console.log("price of eth", price);
+        // price has 8 decimals, so we multiply by 10^10 to get to 18 decimals
+        // then divide by the price to get the token amount
+        return (dscAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION);
     }
 
     // Getter Functions
