@@ -19,6 +19,12 @@ This project implements a decentralized stablecoin system inspired by DAI but wi
 - **Liquidation Mechanism**: Allows external actors to liquidate undercollateralized positions with a 10% bonus incentive
 - **Reentrancy Protection**: Implements OpenZeppelin's ReentrancyGuard for secure function execution
 
+### System Diagram
+
+The following diagram illustrates the architecture of the DSC system:
+
+![DSC System Architecture Diagram](dsc-system-diagram.svg)
+
 ## System Architecture
 
 The system consists of two main contracts:
