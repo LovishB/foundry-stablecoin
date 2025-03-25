@@ -12,7 +12,7 @@ This project implements a decentralized stablecoin system inspired by DAI but wi
 - Always overcollateralized
 
 ## Overview
-![Bagel Token & Merkle Airdrop Architecture](./dsc-system-diagram.svg)
+![Architecture](./dsc-system-diagram.svg)
 
 ## Key Features
 
