@@ -11,6 +11,9 @@ This project implements a decentralized stablecoin system inspired by DAI but wi
 - Maintained at a 1:1 peg with USD through algorithmic mechanisms
 - Always overcollateralized
 
+## Overview
+![Bagel Token & Merkle Airdrop Architecture](./dsc-system-diagram.svg)
+
 ## Key Features
 
 - **200% Collateralization Ratio**: Ensures the system remains solvent even during market volatility
