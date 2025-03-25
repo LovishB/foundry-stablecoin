@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+  <!-- Background -->
+  <rect width="800" height="500" fill="#f8f9fa" rx="10" ry="10"/>
+  
+  <!-- Title -->
+  <text x="400" y="40" font-family="Arial, sans-serif" font-size="24" font-weight="bold" text-anchor="middle" fill="#333">Decentralized Stablecoin System</text>
+  
+  <!-- Boxes -->
+  <!-- DSCEngine -->
+  <rect x="300" y="100" width="200" height="100" fill="#6c8ebf" stroke="#333" stroke-width="2" rx="5" ry="5" opacity="0.8"/>
+  <text x="400" y="150" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="white">DSCEngine</text>
+  <text x="400" y="175" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="white">Core Logic</text>
+  
+  <!-- DecentralizedStableCoin -->
+  <rect x="550" y="200" width="200" height="100" fill="#d5e8d4" stroke="#333" stroke-width="2" rx="5" ry="5" opacity="0.8"/>
+  <text x="650" y="250" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#333">DSC Token</text>
+  <text x="650" y="275" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333">ERC20 Token</text>
+  
+  <!-- WETH -->
+  <rect x="50" y="200" width="200" height="100" fill="#ffe6cc" stroke="#333" stroke-width="2" rx="5" ry="5" opacity="0.8"/>
+  <text x="150" y="250" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#333">WETH</text>
+  <text x="150" y="275" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333">Collateral Token</text>
+  
+  <!-- Chainlink Price Feed -->
+  <rect x="300" y="350" width="200" height="100" fill="#fff2cc" stroke="#333" stroke-width="2" rx="5" ry="5" opacity="0.8"/>
+  <text x="400" y="400" font-family="Arial, sans-serif" font-size="18" font-weight="bold" text-anchor="middle" fill="#333">Chainlink</text>
+  <text x="400" y="425" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" fill="#333">ETH/USD Price Feed</text>
+  
+  <!-- Arrows -->
+  <!-- DSCEngine to DSC Token -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
+    </marker>
+  </defs>
+  
+  <!-- DSCEngine to DSC -->
+  <line x1="500" y1="150" x2="550" y2="200" stroke="#333" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="540" y="165" font-family="Arial, sans-serif" font-size="12" fill="#333">mint/burn</text>
+  
+  <!-- WETH to DSCEngine -->
+  <line x1="250" y1="225" x2="300" y2="175" stroke="#333" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="235" y="190" font-family="Arial, sans-serif" font-size="12" fill="#333">deposit/withdraw</text>
+  
+  <!-- Chainlink to DSCEngine -->
+  <line x1="400" y1="350" x2="400" y2="200" stroke="#333" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="410" y="275" font-family="Arial, sans-serif" font-size="12" fill="#333">price data</text>
+  
+  <!-- Key metrics box -->
+  <rect x="550" y="75" width="200" height="85" fill="#f5f5f5" stroke="#333" stroke-width="1" rx="5" ry="5"/>
+  <text x="650" y="95" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#333">Key Parameters</text>
+  <text x="560" y="120" font-family="Arial, sans-serif" font-size="12" fill="#333">• 200% Collateral Ratio</text>
+  <text x="560" y="140" font-family="Arial, sans-serif" font-size="12" fill="#333">• Health Factor ≥ 4 (safe)</text>
+  <text x="560" y="160" font-family="Arial, sans-serif" font-size="12" fill="#333">• Health Factor < 3 (liquidation)</text>
+</svg>
