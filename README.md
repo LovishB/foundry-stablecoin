@@ -38,17 +38,6 @@ The system consists of two main contracts:
 - `redeemCollateralAndBurnDSC`: Perform both actions in a single transaction
 - `liquidate`: Allow external users to liquidate unhealthy positions
 
-### DecentralizedStableCoin
-
-- `mint`: Create new DSC tokens (restricted to owner/engine)
-- `burn`: Destroy DSC tokens (restricted to owner/engine)
-
-## Health Factor System
-
-The protocol uses a health factor system to ensure adequate collateralization:
-
-- **Health Factor ≥ 4**: Required for all minting and redemption operations (200% collateralization)
-- **Health Factor < 3**: Position becomes eligible for liquidation (below 150% collateralization)
 
 ## Liquidation Process
 
@@ -88,36 +77,6 @@ forge build
 ```bash
 forge test
 ```
-
-## Usage Examples
-
-Here are some examples of how to interact with the system (using Foundry's `cast` tool):
-
-### Deposit Collateral
-
-```bash
-cast send --private-key $PRIVATE_KEY $DSC_ENGINE_ADDRESS "depositCollateral(address,uint256)" $WETH_ADDRESS $AMOUNT_IN_WEI
-```
-
-### Mint Stablecoin
-
-```bash
-cast send --private-key $PRIVATE_KEY $DSC_ENGINE_ADDRESS "mintDSC(uint256)" $AMOUNT_IN_WEI
-```
-
-## Security Considerations
-
-- The system is designed to be always overcollateralized
-- Chainlink price feeds are used for secure price discovery
-- ReentrancyGuard protects against reentrancy attacks
-- Error handling is comprehensive with specific error messages
-
-## Future Improvements
-
-- Add support for additional collateral types beyond WETH
-- Implement a DAO for governance decisions
-- Create an interest rate model for borrowing
-- Develop a front-end interface for easier interaction
 
 ## License
 
